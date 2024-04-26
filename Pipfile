@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+openai = "*"
+quart = "*"
+moviepy = "*"
+ffmpeg-python = "*"
+ffprobe-python = "*"
+opencv-contrib-python = "*"
+boto3 = "*"
+quart-cors = "*"
+human-id = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"

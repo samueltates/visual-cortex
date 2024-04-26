@@ -1,0 +1,8 @@
+{
+    "aws_key": "build-general-door-state.mov",
+    "extension": "video/mkv",
+    "b_roll_to_overlay": [
+        {"prompt": "the traditional owners of the Wurundjeri people", "start": "00:00:01.000", "end": "00:00:05.000"}
+    ],
+    "transcript_lines":[{"chunkID": 0, "start": "00:00:00.000", "end": "00:00:00.884", "text": "below."}, {"chunkID": 1, "start": "00:00:01.606", "end": "00:00:03.468", "text": "Hello, my name is Sam."}, {"chunkID": 2, "start": "00:00:04.185", "end": "00:00:05.518", "text": "I am a big potato."}, {"chunkID": 3, "start": "00:00:05.860", "end": "00:00:06.659", "text": "I live on."}, {"chunkID": 4, "start": "00:00:07.016", "end": "00:00:07.900", "text": "Potato Street."}]
+}

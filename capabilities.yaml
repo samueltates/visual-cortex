@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Simplified ECS Service on EC2
+
+Resources:
+
+  MyEcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: SimpleECSCluster
+
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  MyEcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+        - EC2
+      Family: Media
+      ContainerDefinitions:
+        - Name: MediaTransformer
+          Image: 914796322262.dkr.ecr.us-east-1.amazonaws.com/visual-cortex
+          Memory: 512
+          Cpu: 256
+          Essential: true
+
+  MyEcsService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: SimpleService
+      Cluster: !Ref MyEcsCluster
+      TaskDefinition: !Ref MyEcsTaskDefinition
+      DesiredCount: 1

@@ -1,0 +1,11 @@
+actions
+
+- preprocess account side / nova stuff, prep ... prompts + image
+- send video request and get response
+
+
+curl -X POST http://ec2-user@ec2-34-229-126-156.compute-1.amazonaws.com:5500/transform \
+-H "Content-Type: application/json" \
+-d @example.json
+
+
