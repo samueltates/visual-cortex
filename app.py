@@ -16,7 +16,7 @@ app.config['QUART_CORS_ALLOW_HEADERS'] = "contenttype, Authorization"
 def hello_world():
     return 'Hello, World!'
 
-@app.route('/transform', method=['POST'])
+@app.route('/transform', methods=['POST'])
 async def transform():
     logger.debug('Received a request to transform media')
     logger.debug(f'Payload details: {await request.get_json()}')
