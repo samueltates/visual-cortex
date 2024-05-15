@@ -62,10 +62,10 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
             clip_duration = clip_audio.duration
             # clip = AudioFileClip(processed_file.name)
             #set to 1080 x 1920
-            clip_size = 720, 1280
+            clip_size = 360, 640
             protect_ends = False 
 
-            clip_dimensions =  1280, 720, 1
+            clip_dimensions =  640, 360, 1
             layout = 'vertical'
 
         
@@ -159,7 +159,7 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
                         image_clip = image_clip.crossfadeout(fadeout_duration)
 
 
-                scale_modifier = clip_widest / 1920
+                scale_modifier = clip_widest / 640
                 pixels_per_second = 75 * scale_modifier
                 # eZprint(f'pixels per second {pixels_per_second}', DEBUG_KEYS)
                 
