@@ -20,7 +20,7 @@ RUN pipenv sync
 # RUN pipenv install --deploy --ignore-pipfile
 RUN sed -i 's/none/read,write/g' /etc/ImageMagick-6/policy.xml
 
-EXPOSE 5500
+EXPOSE 5501
 
 ENV NAME World
 
