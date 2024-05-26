@@ -1,6 +1,7 @@
 import os
 import boto3
 from logger_manager import logger
+import asyncio
 
 # from tools.debug import eZprint
 s3 = boto3.client(
@@ -16,7 +17,10 @@ from logger_manager import logger
 async def write_file(file_content, file_name):
 
     # eZprint(f'Writing file {file_name}', ['AWS', 'FILE_HANDLING'])
-    s3.put_object(Body=file_content, Bucket='ask-nova-media', Key=file_name)
+    def put_object():
+        s3.put_object(Body=file_content, Bucket='ask-nova-media', Key=file_name)
+    
+    await asyncio.get_event_loop().run_in_executor(None, put_object)
     url = await get_signed_urls(file_name)
     # eZprint(f'File written to {url}', ['AWS', 'FILE_HANDLING'])
     return url
@@ -24,14 +28,18 @@ async def write_file(file_content, file_name):
 async def read_file(file_name):
     logger.debug(f'Reading file from S3: {file_name}')
     
-    try:
+    # try:
+    def get_object():
         response = s3.get_object(Bucket='ask-nova-media', Key=file_name)
         file_content = response['Body'].read()
-        logger.debug(f'Successfully read file {file_name} from S3')
         return file_content
-    except Exception as e:
-        logger.error(f'Error reading file {file_name} from S3: {str(e)}')
-        raise e  # Rethrow the exception to handle it in the calling function.
+    file_content = await asyncio.get_event_loop().run_in_executor(None, get_object)
+
+    logger.debug(f'Successfully read file {file_name} from S3')
+    return file_content
+    # except Exception as e:
+    #     logger.error(f'Error reading file {file_name} from S3: {str(e)}')
+    #     raise e  # Rethrow the exception to handle it in the calling function.
 
 async def get_signed_urls(file_name):
     presigned_url = s3.generate_presigned_url(

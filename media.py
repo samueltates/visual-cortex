@@ -18,75 +18,122 @@ from s3 import read_file, write_file
 from openai import OpenAI
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY', default=None))
 
+time_passed = 0
+last_request_time = None
+
+from requests.adapters import HTTPAdapter, Retry
+s = requests.Session()
+
 
 async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines):
 
+    global last_request_time
+    last_request_time = datetime.now()
+
+
     logger.debug(f'Overlaying b-roll on {aws_key}, with {extension}')
-    try:
+    # try:
 
 
-        media_file = await read_file(aws_key)
-        clip = None
-        protect_ends = True
-        if 'video' in extension:
-            processed_file = tempfile.NamedTemporaryFile( delete=True)
-        elif 'audio' in extension:
-            processed_file = tempfile.NamedTemporaryFile( delete=True)
-        # else:
-        #     # Handle other file types or raise an error if unsupported type.
-        #     processed_file = None
+    media_file = await read_file(aws_key)
+    clip = None
+    protect_ends = True
+    if 'video' in extension:
+        processed_file = tempfile.NamedTemporaryFile( delete=True)
+    elif 'audio' in extension:
+        processed_file = tempfile.NamedTemporaryFile( delete=True)
+    # else:
+    #     # Handle other file types or raise an error if unsupported type.
+    #     processed_file = None
 
-        processed_file.write(media_file)
-        composites = []
-        clip_audio = None
-        clip_duration = 0
-        clip_size = None
+    processed_file.write(media_file)
+    composites = []
+    clip_audio = None
+    clip_duration = 0
+    clip_size = None
 
-        if 'video' in extension:
+    if 'video' in extension:
 
-            clip = VideoFileClip(processed_file.name)
-            rotated = await is_rotated(processed_file.name)
-            if rotated:
-                clip = clip.resize(clip.size[::-1])
+        clip = VideoFileClip(processed_file.name)
+        rotated = await is_rotated(processed_file.name)
+        if rotated:
+            clip = clip.resize(clip.size[::-1])
 
-            clip_audio = clip.audio
-            clip_duration = clip.duration
-            clip_size = clip.size
-            clip_dimensions = clip.get_frame(0).shape
-            layout = await determine_orientation(clip_dimensions)
-            composites.append(clip)
+        clip_audio = clip.audio
+        clip_duration = clip.duration
+        clip_size = clip.size
+        clip_dimensions = clip.get_frame(0).shape
+        layout = await determine_orientation(clip_dimensions)
+        composites.append(clip)
 
-        else :
-            # create placeholder clip for audio
-            clip_audio = AudioFileClip(processed_file.name)
-            clip_duration = clip_audio.duration
-            # clip = AudioFileClip(processed_file.name)
-            #set to 1080 x 1920
-            clip_size = 360, 640
-            protect_ends = False 
+    else :
+        # create placeholder clip for audio
+        clip_audio = AudioFileClip(processed_file.name)
+        clip_duration = clip_audio.duration
+        # clip = AudioFileClip(processed_file.name)
+        #set to 1080 x 1920
+        clip_size = 360, 640
+        protect_ends = False 
 
-            clip_dimensions =  640, 360, 1
-            layout = 'vertical'
+        clip_dimensions =  640, 360, 1
+        layout = 'vertical'
 
-        
-        
-        tasks = []
-        for b_roll in b_roll_to_overlay:
-            prompt = b_roll['prompt']        
+    
+    
+    tasks = []
+    logger.debug(f'Processing {len(b_roll_to_overlay)} b-roll clips')
+    for b_roll in b_roll_to_overlay:
+        prompt = b_roll['prompt']   
+        logger.debug(f'Processing b-roll object: {b_roll}')
+        if not b_roll.get('media_key'):      
+            logger.debug(f'Generating image for prompt: {prompt}')      
             task = asyncio.create_task(generate_temp_image(prompt))
             tasks.append(task)
-        images = await asyncio.gather(*tasks)
-        # print('images', images)
-        counter = 0
-        for b_roll in b_roll_to_overlay:
-            processed_image = images[counter]
-            counter += 1
+        else:
+            logger.debug(f'Using existing image for prompt: {prompt}')
+            media_key = b_roll['media_key']
+            try:
+                task = asyncio.create_task(get_image_from_s3(prompt, media_key))
+
+            except Exception as e:
+                logger.error(f'Error reading file {media_key} from S3')
+    logger.debug('Awaiting image generation')
+    time_passed = 0
+    images = await asyncio.gather(*tasks)
+    # print('images', images)
+    for image in images:
+        if image:
+            prompt = image['prompt']
+            for b_roll in b_roll_to_overlay:
+                if b_roll['prompt'] == prompt:
+                    b_roll['file'] = image.get('file')
+                    b_roll['media_key'] = image.get('media_key')
+                    b_roll['media_url'] = image.get('media_url')
+                    break
+
+
+    counter = 0
+    for b_roll in b_roll_to_overlay:
+        logger.debug(f'doing b-roll transform: {b_roll}')
+        prompt = b_roll['prompt']   
+        processed_image = b_roll.get('file')
+        b_roll['file'] = None
+        counter += 1
+
+        try:
+            if not processed_image:
+                logger.error(f'No image found for prompt: {prompt}')
+                continue
             if processed_image :
+                logger.debug(f'Processing b-roll image: {prompt} with file {processed_image.name}')
 
                 start, end = b_roll['start'], b_roll['end']
-                start = datetime.strptime(start, '%H:%M:%S.%f')
-                end = datetime.strptime(end, '%H:%M:%S.%f')
-
+                try:
+                    start = datetime.strptime(start, '%H:%M:%S.%f')
+                    end = datetime.strptime(end, '%H:%M:%S.%f')
+                except:
+                    start = datetime.strptime(start, '%H:%M:%S')
+                    end = datetime.strptime(end, '%H:%M:%S')
 
                 #get as  time delta
                 if not protect_ends: # stupid as fuck designator for if its audio or video - this is audio
@@ -100,10 +147,14 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
                     else:
                         end = b_roll_to_overlay[counter]['start']
                         # eZprint_anything(['not last clip',len(b_roll_to_overlay), end], ['OVERLAY'], line_break=True)
-                        end = datetime.strptime(end, '%H:%M:%S.%f')
+                        try:
+                            end = datetime.strptime(end, '%H:%M:%S.%f')
+                        except:
+                            end = datetime.strptime(end, '%H:%M:%S')
+
                         
                 duration = end - start
-                duration = duration.total_seconds()
+                duration = duration.total_seconds() 
 
                 start_delta = start - datetime.strptime('00:00:00.000', '%H:%M:%S.%f')
                 start = start_delta.total_seconds()
@@ -123,6 +174,7 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
                         continue
                 
                 image = cv2.imread(processed_image.name)
+                # processed_image.close() 
 
                 if layout == 'horizontal':
                     # Resize image based on orientation of clip
@@ -164,7 +216,7 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
                 # eZprint(f'pixels per second {pixels_per_second}', DEBUG_KEYS)
                 
                 width_pixels_to_cover_ps = (((resized_image.shape[1]/clip_dimensions[1] ) - 1 )/ duration) * clip_dimensions[1]
-    
+
                 if width_pixels_to_cover_ps < pixels_per_second:
                     pixels_per_second = width_pixels_to_cover_ps
 
@@ -203,159 +255,170 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
                     
 
                 composites.append(image_clip)
-
-        if transcript_lines:
-            transcript_lines.sort(key=lambda x: x['chunkID'])
-            for line in transcript_lines:
-                # eZprint_anything([line], ['OVERLAY'])
-                start = line['start']
-                end = line['end']
-
+        except Exception as e:
+            logger.error(f'Error processing b-roll image: {str(e)}')
+            continue
+    if transcript_lines:
+        transcript_lines.sort(key=lambda x: x['chunkID'])
+        for line in transcript_lines:
+            # eZprint_anything([line], ['OVERLAY'])
+            start = line['start']
+            end = line['end']
+            try:
                 start = datetime.strptime(start, '%H:%M:%S.%f')
                 end = datetime.strptime(end, '%H:%M:%S.%f')
-                #get as  time delta
-                duration = end - start
-                duration = duration.total_seconds()
-                text = line.get('text', '')
+            except:
+                start = datetime.strptime(start, '%H:%M:%S')
+                end = datetime.strptime(end, '%H:%M:%S')
+            #get as  time delta
+            duration = end - start
+            duration = duration.total_seconds()
+            text = line.get('text', '')
 
-                ## splits lines up by appostrophe or and divides timestamp and time between them based on sections
-        
-                # eZprint_anything([text], ['OVERLAY', 'TRANSCRIBE'])
-                ## checks if any line has more than 5 words and if so splits it up into sections
+            ## splits lines up by appostrophe or and divides timestamp and time between them based on sections
+    
+            # eZprint_anything([text], ['OVERLAY', 'TRANSCRIBE'])
+            ## checks if any line has more than 5 words and if so splits it up into sections
 
-                # lines_split_by_apostophe = []
-                
-                # for new_line in lines_split_by_word_count:
-                #     eZprint('checking for apostrophe', ['OVERLAY', 'TRANSCRIBE'])
-                #     new_line_sections = new_line.split(',')
-                #     eZprint_anything([new_line_sections], ['OVERLAY'], line_break=True)
-                #     if len(new_line_sections) > 1:
-                #         eZprint('found apostrophe', ['OVERLAY', 'TRANSCRIBE'])
-                #         for new_line_section in new_line_sections:
-                #             if new_line_section != '':
-                #                 lines_split_by_apostophe.append(new_line_section)
-                #     else:
-                #         lines_split_by_apostophe.append(new_line)
-                
-                # eZprint('running line list', ['OVERLAY', 'TRANSCRIBE'])
-                # eZprint_anything([lines_split_by_apostophe], ['OVERLAY'], line_break=True)
-                            
-                # get total characters in line by finding how many newlines were added, 
-                lines_split_by_word_count = []
-                total_lines = 0
-                if len(text.split(' ')) > 2:
-                    # eZprint('splitting line as over 2', ['OVERLAY', 'TRANSCRIBE'])
-                    split_text = text.split(' ')
-                    word_count = len(split_text)
-                    lines_needed = word_count / 2
-                    # round up to int
-                    lines_needed = int(lines_needed) 
+            # lines_split_by_apostophe = []
+            
+            # for new_line in lines_split_by_word_count:
+            #     eZprint('checking for apostrophe', ['OVERLAY', 'TRANSCRIBE'])
+            #     new_line_sections = new_line.split(',')
+            #     eZprint_anything([new_line_sections], ['OVERLAY'], line_break=True)
+            #     if len(new_line_sections) > 1:
+            #         eZprint('found apostrophe', ['OVERLAY', 'TRANSCRIBE'])
+            #         for new_line_section in new_line_sections:
+            #             if new_line_section != '':
+            #                 lines_split_by_apostophe.append(new_line_section)
+            #     else:
+            #         lines_split_by_apostophe.append(new_line)
+            
+            # eZprint('running line list', ['OVERLAY', 'TRANSCRIBE'])
+            # eZprint_anything([lines_split_by_apostophe], ['OVERLAY'], line_break=True)
+                        
+            # get total characters in line by finding how many newlines were added, 
+            lines_split_by_word_count = []
+            total_lines = 0
+            if len(text.split(' ')) > 2:
+                # eZprint('splitting line as over 2', ['OVERLAY', 'TRANSCRIBE'])
+                split_text = text.split(' ')
+                word_count = len(split_text)
+                lines_needed = word_count / 2
+                # round up to int
+                lines_needed = int(lines_needed) 
 
-                    # eZprint(f'lines needed {lines_needed}', ['OVERLAY', 'TRANSCRIBE'])
-                    if lines_needed > 1:    
-                        wpl = int(len(split_text) / lines_needed)
-                        # eZprint(f'words per line {wpl}', ['OVERLAY', 'TRANSCRIBE'])
-                        for i in range(lines_needed):
-                            new_line = ' '.join(split_text[i * wpl:(i * wpl)+wpl])
-                            # lines_split_by_word_count.append(new_line)
-                            ## if last line add the rest of the words
-                            if i == lines_needed - 1:
-                                new_line += " "
-                                new_line += ' '.join(split_text[(i * wpl)+wpl:])
-                            lines_split_by_word_count.append(new_line)
-                            total_lines += 1
-                    else:
-                        lines_split_by_word_count.append(text)
+                # eZprint(f'lines needed {lines_needed}', ['OVERLAY', 'TRANSCRIBE'])
+                if lines_needed > 1:    
+                    wpl = int(len(split_text) / lines_needed)
+                    # eZprint(f'words per line {wpl}', ['OVERLAY', 'TRANSCRIBE'])
+                    for i in range(lines_needed):
+                        new_line = ' '.join(split_text[i * wpl:(i * wpl)+wpl])
+                        # lines_split_by_word_count.append(new_line)
+                        ## if last line add the rest of the words
+                        if i == lines_needed - 1:
+                            new_line += " "
+                            new_line += ' '.join(split_text[(i * wpl)+wpl:])
+                        lines_split_by_word_count.append(new_line)
                         total_lines += 1
                 else:
                     lines_split_by_word_count.append(text)
                     total_lines += 1
-            
-                # eZprint_anything([lines_split_by_word_count], ['OVERLAY', 'TRANSCRIBE'], line_break=True)
-
-                
-                line_characters = len(text) - (len(lines_split_by_word_count) - len(lines_split_by_word_count) ) + 1
-                start_delta = start - datetime.strptime('00:00:00.000', '%H:%M:%S.%f')
-                start = start_delta.total_seconds()
-                running_progress = start
-
-                # eZprint(f'line characters {line_characters}', ['OVERLAY', 'TRANSCRIBE'])
-
-                # for line in lines_split_by_apostophe:
-                #     eZprint_anything([line], ['OVERLAY'], line_break=True)
-                #     # line_section_duration = duration / len(line_sections)
-
-                #     if line != '':
-
-                if os.getenv('DEBUG_SPLIT_BY_WORDS', default=None) == 'True':
-                    line_percent = 1/total_lines
-
-                for line in lines_split_by_word_count:
-                    if line != '':
-                        if not os.getenv('DEBUG_SPLIT_BY_WORDS', default=None) == 'True':
-                            line_percent = len(line) / line_characters
-                        line_duration = duration * line_percent
-                        line_start = running_progress
-                        line_end = line_start + line_duration
-                        # duration_modifier = line_duration * .1
-                        running_progress = line_end
-                        text = line.strip()
-                        size = clip_dimensions[1]* .8, None
-                        # if os.getenv('DEBUG_LABEL', default=None) == 'True':
-                        #     text_clip = TextClip(text.upper(), size = size, fontsize=50, color='white', kerning = 5, method='label', align='west', font = 'Oswald-SemiBold', stroke_color='black', stroke_width=1)
-                        # else:
-
-                        ## set font size dynamically based on screen resolution
-
-                        screen_mod = (size[0] + size[0]) / (1920+1080)
-                        font_size = int(os.getenv('DEBUG_FONT_SIZE', default=200))
-                        font_type = os.getenv('DEBUG_FONT_TYPE', default='Barlow-Bold')
-                        font_size = font_size * screen_mod
-                        stroke_width = 4 * screen_mod
-                        interline = -20 * screen_mod
-                        kerning = 2 * screen_mod
-
-                        text_clip = TextClip(text.upper(), size = size, fontsize=font_size, color='white', kerning = kerning, method='caption', align='west', font = font_type, stroke_color='black', stroke_width=stroke_width, interline=interline)
-                        # eZprint(TextClip.search(font_type, 'font'), ['OVERLAY', 'TRANSCRIBE'])
-                        # eZprint(TextClip.list('font'), ['OVERLAY', 'TRANSCRIBE'])
-                        text_clip = text_clip.set_duration(line_duration )
-                        text_clip = text_clip.set_start(line_start )
-                        # set position so its centered on x and 80% down on y
-                        text_clip = text_clip.set_position((.1, 0.7), relative=True)
-                        # eZprint(f'line start {line_start} line end {line_end} line duration {line_duration} line percent {line_percent}', ['OVERLAY', 'TRANSCRIBE'])
-                        composites.append(text_clip)
-
-        def get_composite_clip(composites, clip_size, clip_audio, processed_file_name):
-            compositeClip = CompositeVideoClip(composites, size=clip_size)
-            compositeClip.audio = clip_audio
-            compositeClip.write_videofile(processed_file_name,  remove_temp=True, codec='libx264', audio_codec='aac', fps=24)
-            return processed_file_name
+            else:
+                lines_split_by_word_count.append(text)
+                total_lines += 1
         
-        file_to_send =  tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-        try:
-            composite_loop = asyncio.get_event_loop()
-            file_name = await composite_loop.run_in_executor(None, lambda: get_composite_clip(composites, clip_size, clip_audio, file_to_send.name))
-        except Exception as e:
+            # eZprint_anything([lines_split_by_word_count], ['OVERLAY', 'TRANSCRIBE'], line_break=True)
 
-            logger.error(f'Error creating composite clip: {str(e)}')
-            return {'status': 'error', 'message': str(e)}
+            
+            line_characters = len(text) - (len(lines_split_by_word_count) - len(lines_split_by_word_count) ) + 1
+            start_delta = start - datetime.strptime('00:00:00.000', '%H:%M:%S.%f')
+            start = start_delta.total_seconds()
+            running_progress = start
 
+            # eZprint(f'line characters {line_characters}', ['OVERLAY', 'TRANSCRIBE'])
+
+            # for line in lines_split_by_apostophe:
+            #     eZprint_anything([line], ['OVERLAY'], line_break=True)
+            #     # line_section_duration = duration / len(line_sections)
+
+            #     if line != '':
+
+            if os.getenv('DEBUG_SPLIT_BY_WORDS', default=None) == 'True':
+                line_percent = 1/total_lines
+
+            for line in lines_split_by_word_count:
+                if line != '':
+                    if not os.getenv('DEBUG_SPLIT_BY_WORDS', default=None) == 'True':
+                        line_percent = len(line) / line_characters
+                    line_duration = duration * line_percent
+                    line_start = running_progress
+                    line_end = line_start + line_duration
+                    # duration_modifier = line_duration * .1
+                    running_progress = line_end
+                    text = line.strip()
+                    size = clip_dimensions[1]* .8, None
+                    # if os.getenv('DEBUG_LABEL', default=None) == 'True':
+                    #     text_clip = TextClip(text.upper(), size = size, fontsize=50, color='white', kerning = 5, method='label', align='west', font = 'Oswald-SemiBold', stroke_color='black', stroke_width=1)
+                    # else:
+
+                    ## set font size dynamically based on screen resolution
+
+                    screen_mod = (size[0] + size[0]) / (1920+1080)
+                    font_size = int(os.getenv('DEBUG_FONT_SIZE', default=200))
+                    font_type = os.getenv('DEBUG_FONT_TYPE', default='Barlow-Bold')
+                    font_size = font_size * screen_mod
+                    stroke_width = 4 * screen_mod
+                    interline = -20 * screen_mod
+                    kerning = 2 * screen_mod
+
+                    text_clip = TextClip(text.upper(), size = size, fontsize=font_size, color='white', kerning = kerning, method='caption', align='west', font = font_type, stroke_color='black', stroke_width=stroke_width, interline=interline)
+                    # eZprint(TextClip.search(font_type, 'font'), ['OVERLAY', 'TRANSCRIBE'])
+                    # eZprint(TextClip.list('font'), ['OVERLAY', 'TRANSCRIBE'])
+                    text_clip = text_clip.set_duration(line_duration )
+                    text_clip = text_clip.set_start(line_start )
+                    # set position so its centered on x and 80% down on y
+                    text_clip = text_clip.set_position((.1, 0.7), relative=True)
+                    # eZprint(f'line start {line_start} line end {line_end} line duration {line_duration} line percent {line_percent}', ['OVERLAY', 'TRANSCRIBE'])
+                    composites.append(text_clip)
+
+    def get_composite_clip(composites, clip_size, clip_audio, processed_file_name):
+        compositeClip = CompositeVideoClip(composites, size=clip_size)
+        compositeClip.audio = clip_audio
+        compositeClip.write_videofile(processed_file_name,  remove_temp=True, codec='libx264', audio_codec='aac', fps=24)
+        return processed_file_name
+    
+    file_to_send =  tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    url = None
+    try:
+        composite_loop = asyncio.get_event_loop()
+        file_name = await composite_loop.run_in_executor(None, lambda: get_composite_clip(composites, clip_size, clip_audio, file_to_send.name))
         new_key = generate_id()
         url = await write_file(file_to_send.file, new_key ) 
+    except Exception as e:
 
-        payload = {'aws_key': file_to_send.name, 'media_url': url}
-        
-        # compositeClip.write_videofile(file_to_send.name,  remove_temp=True, codec='libx264', audio_codec='aac')
-        # await websocket.send(json.dumps({'event': 'video_ready', 'payload': {'video_name': file_to_send.name}}))
-        # final_clip.write_videofile("my_concatenation.mp4", fps=24, codec='libx264', audio_codec='aac')
-        logger.debug(f'Successfully processed b-roll for {aws_key}')
-        return payload
-    except Exception as e:  
-        logger.error(f'Failed to process b-roll for {aws_key}: {str(e)}')
-        return {'status': 'error', 'message': str(e)}
+        logger.error(f'Error creating composite clip: {str(e)}')
+        # return {'status': 'error', 'message': str(e)}
+
+
+    for b_roll in b_roll_to_overlay:
+        if b_roll.get('file'):
+            b_roll['file'].close()
+            # delete file record
+            del b_roll['file']
+    payload = {'aws_key': new_key, 'media_url': url, 'b_roll': b_roll_to_overlay, 'transcript_lines': transcript_lines}
+    # compositeClip.write_videofile(file_to_send.name,  remove_temp=True, codec='libx264', audio_codec='aac')
+    # await websocket.send(json.dumps({'event': 'video_ready', 'payload': {'video_name': file_to_send.name}}))
+    # final_clip.write_videofile("my_concatenation.mp4", fps=24, codec='libx264', audio_codec='aac')
+    logger.debug(f'Successfully processed b-roll for {aws_key}')
+    return payload
+    # except Exception as e:  
+    #     logger.error(f'Failed to process b-roll for {aws_key}: {str(e)}')
+    #     return {'status': 'error', 'message': str(e), 'b_roll': b_roll_to_overlay, 'transcript_lines': transcript_lines}
        
 
 
+    
 
 async def generate_temp_image(prompt):
     DEBUG_KEYS = ['FILE_HANDLING', 'IMAGE_GENERATION']
@@ -363,22 +426,34 @@ async def generate_temp_image(prompt):
     try:
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(None, lambda: openai_client.images.generate(prompt=prompt,
-                                                                                          model='dall-e-3',
         n=1,
-        size='1024x1024'))
+        size='1024x1024',
+        model='dall-e-3',
+        ))
+
     except Exception as e:
-        # eZprint(f'Error generating image: {e}', DEBUG_KEYS)
-        return None
+        return {'prompt':prompt}
+
     
     image_url = response.data[0].url
     response = requests.get(image_url)
-    # eZprint(f'Image URL: {image_url}', DEBUG_KEYS)
     processed_media = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
     processed_media.write(response.content)
     processed_media.close()
-    return processed_media
-    
 
+    new_key = generate_id()
+    url = await write_file(response.content, new_key )
+    logger.debug(f'url for image: {url}')
+    return {'prompt':prompt, 'file' : processed_media, 'media_url' : url, 'media_key': new_key}
+    
+async def get_image_from_s3(prompt, media_key):
+
+    file = await read_file(media_key)
+    logger.debug(f'Using existing image for prompt: {prompt} with file {file}')
+
+    processed_media = tempfile.NamedTemporaryFile( delete=False)
+    processed_media.write(file)
+    return {'prompt':prompt, 'file' : processed_media}
 
 def calculate_pan_position(t, direction, start_position, end_position, pixels_per_second):
     if direction == 'left':
@@ -393,6 +468,14 @@ def calculate_pan_position(t, direction, start_position, end_position, pixels_pe
     # eZprint(f'panning {direction} to position {clamped_position}', ['OVERLAY'])
     return clamped_position
 
+def count_time_passing():
+
+    current_time = datetime.now()
+    logger.debug(f'Current time: {current_time} - Last request time: {last_request_time}')
+    difference = current_time - last_request_time
+    logger.debug(f'Time difference: {difference}')
+
+    return difference.total_seconds()
 
 
 async def determine_orientation(clip_dimensions):
