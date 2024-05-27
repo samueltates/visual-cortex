@@ -2,7 +2,7 @@ import os
 from quart import Quart, request
 from quart_cors import cors
 import json
-from media import overlay_b_roll
+from media import overlay_b_roll, generate_b_roll
 from logger_manager import logger
 from hypercorn.config import Config
 import asyncio
@@ -40,6 +40,23 @@ async def transform():
     # except Exception as e:
     #     logger.error(f'Error in transform endpoint: {str(e)}')
     #     return str(e), 500
+
+@app.route('/handle_generate_b_roll', methods=['POST'])
+async def handle_generate_b_roll():
+    logger.debug('Received a request to generate b-roll')
+    # logger.debug(f'Payload details: {await request.get_json()}')
+
+    try:
+        payload = await request.get_json()
+
+        b_roll_with_sources = await generate_b_roll(payload)
+        logger.debug('Returning transformed media ', b_roll_with_sources)
+        return json.dumps(b_roll_with_sources)
+
+    except Exception as e:
+        logger.error(f'Error in transform endpoint: {str(e)}')
+        return str(e), 500
+
 
 if __name__ =='__main__':
     host=os.getenv("HOST", default='0.0.0.0')

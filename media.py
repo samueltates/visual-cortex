@@ -25,6 +25,38 @@ from requests.adapters import HTTPAdapter, Retry
 s = requests.Session()
 
 
+async def generate_b_roll( b_roll_to_overlay):
+
+    global last_request_time
+    last_request_time = datetime.now()
+
+    
+    tasks = []
+    logger.debug(f'Generating {len(b_roll_to_overlay)} b-roll clips')
+    for b_roll in b_roll_to_overlay:
+        prompt = b_roll['prompt']   
+        logger.debug(f'About to generate : {b_roll}')
+        if not b_roll.get('media_key'):      
+            logger.debug(f'Generating image for prompt: {prompt}')      
+            task = asyncio.create_task(generate_temp_image(prompt))
+            tasks.append(task)
+
+    images = await asyncio.gather(*tasks)
+
+    for image in images:
+        if image:
+            prompt = image['prompt']
+            for b_roll in b_roll_to_overlay:
+                if b_roll['prompt'] == prompt:
+                    # b_roll['file'] = image.get('file')
+                    b_roll['media_key'] = image.get('media_key')
+                    b_roll['media_url'] = image.get('media_url')
+                    break
+    return b_roll_to_overlay
+
+
+
+
 async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines):
 
     global last_request_time
@@ -32,9 +64,7 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
 
 
     logger.debug(f'Overlaying b-roll on {aws_key}, with {extension}')
-    # try:
-
-
+  
     media_file = await read_file(aws_key)
     clip = None
     protect_ends = True
@@ -81,26 +111,19 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
     
     
     tasks = []
-    logger.debug(f'Processing {len(b_roll_to_overlay)} b-roll clips')
+    logger.debug(f'getting images for {len(b_roll_to_overlay)} b-roll clips')
     for b_roll in b_roll_to_overlay:
         prompt = b_roll['prompt']   
         logger.debug(f'Processing b-roll object: {b_roll}')
-        if not b_roll.get('media_key'):      
-            logger.debug(f'Generating image for prompt: {prompt}')      
-            task = asyncio.create_task(generate_temp_image(prompt))
-            tasks.append(task)
-        else:
-            logger.debug(f'Using existing image for prompt: {prompt}')
+        if b_roll.get('media_key'):      
+            logger.debug(f'media key present: {prompt}')
             media_key = b_roll['media_key']
-            try:
-                task = asyncio.create_task(get_image_from_s3(prompt, media_key))
+            task = asyncio.create_task(get_image_from_s3(prompt, media_key))
+            tasks.append(task)
 
-            except Exception as e:
-                logger.error(f'Error reading file {media_key} from S3')
-    logger.debug('Awaiting image generation')
-    time_passed = 0
+    logger.debug('Awaiting image recall from S3')
+
     images = await asyncio.gather(*tasks)
-    # print('images', images)
     for image in images:
         if image:
             prompt = image['prompt']
@@ -114,8 +137,8 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
 
     counter = 0
     for b_roll in b_roll_to_overlay:
-        logger.debug(f'doing b-roll transform: {b_roll}')
-        prompt = b_roll['prompt']   
+        logger.debug(f'doing b-roll OVERLAY with content for: {b_roll}')
+        prompt = b_roll['prompt']  
         processed_image = b_roll.get('file')
         b_roll['file'] = None
         counter += 1
@@ -449,7 +472,7 @@ async def generate_temp_image(prompt):
 async def get_image_from_s3(prompt, media_key):
 
     file = await read_file(media_key)
-    logger.debug(f'Using existing image for prompt: {prompt} with file {file}')
+    logger.debug(f'Using existing image for prompt: {prompt}')
 
     processed_media = tempfile.NamedTemporaryFile( delete=False)
     processed_media.write(file)
