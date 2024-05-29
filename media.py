@@ -551,6 +551,8 @@ async def get_rotation(source):
     logger.debug(f'ffprobe output: {ffprobe_output}')
     if ffprobe_output and len(ffprobe_output) > 0:  # Output of cmdis None if it should be 0
         # ffprobe_output = json.loads(ffprobe_output[0])
+        if ffprobe_output[0] == '':
+            return 0
         rotation = int(ffprobe_output[0])
     else:
         rotation = 0

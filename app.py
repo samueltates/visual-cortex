@@ -69,7 +69,7 @@ if __name__ =='__main__':
         config.use_reloader = True
         config.debug = True
     else:
-        asyncio.run(serve(app, config), debug=True)
+        asyncio.run(serve(app, config), debug=False)
 
 
     
