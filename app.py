@@ -3,6 +3,7 @@ from quart import Quart, request
 from quart_cors import cors
 import json
 from media import overlay_b_roll, generate_b_roll
+from transcribe import transcribe_file
 from logger_manager import logger
 from hypercorn.config import Config
 import asyncio
@@ -21,25 +22,25 @@ async def transform():
     logger.debug('Received a request to transform media')
     logger.debug(f'Payload details: {await request.get_json()}')
 
-    # try:
-    payload = await request.get_json()
-    aws_key = payload.get('aws_key')
-    extension = payload.get('extension')
-    b_roll_to_overlay = payload.get('b_roll_to_overlay')
-    transcript_lines = payload.get('transcript_lines')
+    try:
+        payload = await request.get_json()
+        aws_key = payload.get('aws_key')
+        extension = payload.get('extension')
+        b_roll_to_overlay = payload.get('b_roll_to_overlay')
+        transcript_lines = payload.get('transcript_lines')
 
-    logger.debug(f'Payload details: aws_key={aws_key}, extension={extension}, b_roll_to_overlay={b_roll_to_overlay}, transcript_lines={len(transcript_lines)} lines')
+        logger.debug(f'Payload details: aws_key={aws_key}, extension={extension}, b_roll_to_overlay={b_roll_to_overlay}, transcript_lines={len(transcript_lines)} lines')
 
-    if aws_key:
-        transformed_media = await overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines)
-        logger.debug('Returning transformed media ', transformed_media)
-        return json.dumps(transformed_media)
-    else:
-        logger.error('AWS Key not provided in the request')
-        return 'AWS Key not provided', 400
-    # except Exception as e:
-    #     logger.error(f'Error in transform endpoint: {str(e)}')
-    #     return str(e), 500
+        if aws_key:
+            transformed_media = await overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines)
+            logger.debug('Returning transformed media ')
+            return json.dumps(transformed_media)
+        else:
+            logger.error('AWS Key not provided in the request')
+            return 'AWS Key not provided', 400
+    except Exception as e:
+        logger.error(f'Error in transform endpoint: {str(e)}')
+        return str(e), 500
 
 @app.route('/handle_generate_b_roll', methods=['POST'])
 async def handle_generate_b_roll():
@@ -50,13 +51,31 @@ async def handle_generate_b_roll():
         payload = await request.get_json()
 
         b_roll_with_sources = await generate_b_roll(payload)
-        logger.debug('Returning transformed media ', b_roll_with_sources)
+        logger.debug('Returning transformed media ')
         return json.dumps(b_roll_with_sources)
 
     except Exception as e:
         logger.error(f'Error in transform endpoint: {str(e)}')
         return str(e), 500
 
+@app.route('/get_transcript', methods=['POST'])
+async def get_transcript():
+    payload = await request.get_json()
+
+    logger.debug('Received request to get transcript with payload')
+    file_key = payload.get('file_key')
+    file_name = payload.get('file_name')
+    file_type = payload.get('file_type')
+    
+    try:
+        payload = await request.get_json()
+        transcript_object = await transcribe_file(file_key, file_name, file_type)
+        logger.debug('Returning transcript object ', transcript_object )
+        return json.dumps(transcript_object)
+
+    except Exception as e:
+        logger.error(f'Error in transform endpoint: {str(e)}')
+        return str(e), 500
 
 if __name__ =='__main__':
     host=os.getenv("HOST", default='0.0.0.0')

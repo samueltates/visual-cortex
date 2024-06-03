@@ -140,7 +140,7 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
         logger.debug(f'doing b-roll OVERLAY with content for: {b_roll}')
         prompt = b_roll['prompt']  
         processed_image = b_roll.get('file')
-        b_roll['file'] = None
+       
         counter += 1
 
         try:
@@ -278,6 +278,8 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
                     
 
                 composites.append(image_clip)
+                processed_image.close()
+                b_roll['file'] = None
         except Exception as e:
             logger.error(f'Error processing b-roll image: {str(e)}')
             continue
@@ -411,13 +413,14 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
         compositeClip.write_videofile(processed_file_name,  remove_temp=True, codec='libx264', audio_codec='aac', fps=24)
         return processed_file_name
     
-    file_to_send =  tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    file_to_send =  tempfile.NamedTemporaryFile(suffix=".mp4", delete=True)
     url = None
     try:
         composite_loop = asyncio.get_event_loop()
         file_name = await composite_loop.run_in_executor(None, lambda: get_composite_clip(composites, clip_size, clip_audio, file_to_send.name))
         new_key = generate_id()
         url = await write_file(file_to_send.file, new_key ) 
+        file_to_send.close()
     except Exception as e:
 
         logger.error(f'Error creating composite clip: {str(e)}')
@@ -426,18 +429,12 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
 
     for b_roll in b_roll_to_overlay:
         if b_roll.get('file'):
-            b_roll['file'].close()
+            # b_roll['file'].close()
             # delete file record
             del b_roll['file']
     payload = {'aws_key': new_key, 'media_url': url, 'b_roll': b_roll_to_overlay, 'transcript_lines': transcript_lines}
-    # compositeClip.write_videofile(file_to_send.name,  remove_temp=True, codec='libx264', audio_codec='aac')
-    # await websocket.send(json.dumps({'event': 'video_ready', 'payload': {'video_name': file_to_send.name}}))
-    # final_clip.write_videofile("my_concatenation.mp4", fps=24, codec='libx264', audio_codec='aac')
-    logger.debug(f'Successfully processed b-roll for {aws_key}')
+    processed_file.close()
     return payload
-    # except Exception as e:  
-    #     logger.error(f'Failed to process b-roll for {aws_key}: {str(e)}')
-    #     return {'status': 'error', 'message': str(e), 'b_roll': b_roll_to_overlay, 'transcript_lines': transcript_lines}
        
 
 
@@ -460,12 +457,14 @@ async def generate_temp_image(prompt):
     
     image_url = response.data[0].url
     response = requests.get(image_url)
-    processed_media = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    processed_media = tempfile.NamedTemporaryFile(suffix=".png", delete= True)
     processed_media.write(response.content)
+    logger.debug(f'Processed media file: {processed_media.name}')
     processed_media.close()
 
     new_key = generate_id()
     url = await write_file(response.content, new_key )
+
     logger.debug(f'url for image: {url}')
     return {'prompt':prompt, 'file' : processed_media, 'media_url' : url, 'media_key': new_key}
     
@@ -474,8 +473,10 @@ async def get_image_from_s3(prompt, media_key):
     file = await read_file(media_key)
     logger.debug(f'Using existing image for prompt: {prompt}')
 
-    processed_media = tempfile.NamedTemporaryFile( delete=False)
+    processed_media = tempfile.NamedTemporaryFile( delete=True)
     processed_media.write(file)
+    logger.debug(f'Processed media file: {processed_media.name}')
+    processed_media.close()
     return {'prompt':prompt, 'file' : processed_media}
 
 def calculate_pan_position(t, direction, start_position, end_position, pixels_per_second):

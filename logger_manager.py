@@ -6,8 +6,8 @@ def setup_logger(name):
     
     # Could further customize with handlers, formatters, etc.
     console_handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
+    # formatter = logging.Formatter('%(asctimes - %(name)s - %(levelname)s - %(message)s')
+    # console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
     return logger

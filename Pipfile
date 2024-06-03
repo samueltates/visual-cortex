@@ -13,6 +13,7 @@ opencv-contrib-python = "*"
 boto3 = "*"
 quart-cors = "*"
 human-id = "*"
+pydub = "*"
 
 [dev-packages]
 
