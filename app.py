@@ -1,5 +1,5 @@
 import os
-from quart import Quart, request
+from quart import Quart, request, jsonify
 from quart_cors import cors
 import json
 from media import overlay_b_roll, generate_b_roll
@@ -32,16 +32,12 @@ async def transform():
 
         logger.debug(f'Payload details: aws_key={aws_key}, extension={extension}, b_roll_to_overlay={b_roll_to_overlay}, transcript_lines={len(transcript_lines)} lines')
 
-        if aws_key:
-            transformed_media = await overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines)
-            logger.debug('Returning transformed media ')
-            return json.dumps(transformed_media)
-        else:
-            logger.error('AWS Key not provided in the request')
-            return 'AWS Key not provided', 400
+        transformed_media = await overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines)
+        logger.debug('Returning transformed media ')
+        return jsonify(transformed_media)
     except Exception as e:
         logger.error(f'Error in transform endpoint: {str(e)}')
-        return str(e), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/handle_generate_b_roll', methods=['POST'])
 async def handle_generate_b_roll():
@@ -53,12 +49,12 @@ async def handle_generate_b_roll():
 
         b_roll_with_sources = await generate_b_roll(payload)
         logger.debug('Returning transformed media ')
-        return json.dumps(b_roll_with_sources)
+        return jsonify(b_roll_with_sources)
 
     except Exception as e:
-        logger.error(f'Error in transform endpoint: {str(e)}')
-        return str(e), 500
-
+        logger.error(f'Error in broll endpoint: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+    
 @app.route('/get_transcript', methods=['POST'])
 async def get_transcript():
     payload = await request.get_json()
@@ -72,11 +68,11 @@ async def get_transcript():
         payload = await request.get_json()
         transcript_object = await transcribe_file(file_key, file_name, file_type)
         logger.debug('Returning transcript object ' )
-        return json.dumps(transcript_object)
+        return jsonify(transcript_object)
 
     except Exception as e:
-        logger.error(f'Error in transform endpoint: {str(e)}')
-        return str(e), 500
+        logger.error(f'Error in transcript endpoint: {str(e)}')
+        return jsonify({'error': str(e)}), 500
 
 if __name__ =='__main__':
     host=os.getenv("HOST", default='0.0.0.0')

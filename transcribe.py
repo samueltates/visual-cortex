@@ -44,6 +44,31 @@ async def transcribe_file(file_key, file_name, file_type):
     return transcript_title
 
 
+async def transcribe_file_stream(file_key, file_name, file_type):
+    file_content = await read_file(file_key)
+    processed_file = tempfile.NamedTemporaryFile(suffix=".mp4")
+    processed_file.write(file_content)
+    transcript_title = ''
+    if 'video/' in file_type:
+        print('video requested')
+        logger.debug('video requested')
+        return transcribe_video_file(processed_file, file_name)
+    elif 'audio/' in file_type:
+        logger.debug('audio requested')
+        loop = asyncio.get_event_loop()
+        audio = await loop.run_in_executor(None, lambda: AudioSegment.from_file(processed_file.name))
+        # audio = await AudioSegment.from_file(processed_file.name)
+        transcript_title = await transcribe_audio_file(audio, file_name)
+
+        
+
+    else:
+        transcript_title = "Unsupported file type for transcription"
+
+    processed_file.close()
+    return transcript_title
+
+
 async def transcribe_video_file(file, name):
     clip = VideoFileClip(file.name)
     audio_temp = tempfile.NamedTemporaryFile( suffix=".mp3")
@@ -116,18 +141,17 @@ async def transcribe_audio_file(audio, name):
     results = await asyncio.gather(*tasks)
     results.sort(key=lambda x: x['chunkID'])
     end = ''
-    transcript_text += f"[00:00:00.000] Start of clip \n\n"
+    # transcript_text += f"[00:00:00.000] Start of clip \n\n"
     logger.debug('async gather complete')
-    for result in results:
-        # eZprint(f"chunk {result['chunkID']} start {result['start']} end {result['end']} text {result['text']}", ['FILE_HANDLING', 'TRANSCRIBE'])
-        # logger.debug(f"chunk {chunkID} length {len(chunk)} and start time {timestamp[0]} and end time {timestamp[1] }")
-        start = result['start']
-        end = result['end']
-        transcript_text += f"{start} --> {end}\n{result['text']} \n\n"
+    # for result in results:
+    #     # eZprint(f"chunk {result['chunkID']} start {result['start']} end {result['end']} text {result['text']}", ['FILE_HANDLING', 'TRANSCRIBE'])
+    #     # logger.debug(f"chunk {chunkID} length {len(chunk)} and start time {timestamp[0]} and end time {timestamp[1] }")
+    #     start = result['start']
+    #     end = result['end']
+    #     transcript_text += f"{start} --> {end}\n{result['text']} \n\n"
     # transcript text end time stap
-    transcript_text += f"[{end}] End of clip \n\n"
+    # transcript_text += f"[{end}] End of clip \n\n"
 
-    logger.debug(f'results combined, char length of transcript is {len(transcript_text)}')
 
     clip_length_in_seconds = len(audio) / 1000
     rounded_length = round(clip_length_in_seconds, 2)
@@ -137,9 +161,10 @@ async def transcribe_audio_file(audio, name):
     transcript_object = {
                         'name' : name,
                         'description' : 'Transcription from ' + name,
-                        'transcript_text' : transcript_text,
+                        'clip_length' : str(rounded_length) + "s",
                         'lines' : results
                     }
+    logger.debug(f'char length of transcript_object is {len(transcript_object)}')
 
     return transcript_object
 

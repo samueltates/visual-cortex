@@ -50,7 +50,7 @@ async def generate_b_roll( b_roll_to_overlay):
                 if b_roll['prompt'] == prompt:
                     # b_roll['file'] = image.get('file')
                     b_roll['media_key'] = image.get('media_key')
-                    b_roll['media_url'] = image.get('media_url')
+                    # b_roll['media_url'] = image.get('media_url')
                     break
     return b_roll_to_overlay
 
@@ -130,8 +130,8 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
             for b_roll in b_roll_to_overlay:
                 if b_roll['prompt'] == prompt:
                     b_roll['file'] = image.get('file')
-                    b_roll['media_key'] = image.get('media_key')
-                    b_roll['media_url'] = image.get('media_url')
+                    # b_roll['media_key'] = image.get('media_key')
+                    # b_roll['media_url'] = image.get('media_url')
                     break
 
 
@@ -432,7 +432,7 @@ async def overlay_b_roll(aws_key, extension, b_roll_to_overlay, transcript_lines
             # b_roll['file'].close()
             # delete file record
             del b_roll['file']
-    payload = {'aws_key': new_key, 'media_url': url, 'b_roll': b_roll_to_overlay, 'transcript_lines': transcript_lines}
+    payload = {'aws_key': new_key, 'media_url': url}
     processed_file.close()
     return payload
        
