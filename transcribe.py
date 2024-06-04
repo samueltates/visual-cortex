@@ -26,9 +26,10 @@ async def transcribe_file(file_key, file_name, file_type):
     transcript_title = ''
     if 'video/' in file_type:
         print('video requested')
+        logger.debug('video requested')
         transcript_title = await transcribe_video_file(processed_file, file_name)
     elif 'audio/' in file_type:
-
+        logger.debug('audio requested')
         loop = asyncio.get_event_loop()
         audio = await loop.run_in_executor(None, lambda: AudioSegment.from_file(processed_file.name))
         # audio = await AudioSegment.from_file(processed_file.name)
@@ -61,9 +62,10 @@ async def transcribe_audio_file(audio, name):
     # Try reducing these values to create smaller clips
     silence_thresh = avg_loudness + (avg_loudness * 0.2)
     min_silence_len = 500
+    logger.debug('seperating audio')
 
     # eZprint(f"silence thresh {silence_thresh} and min silence len {min_silence_len} from average loudness of {avg_loudness}", ['FILE_HANDLING', 'TRANSCRIBE'])
-    logger.debug(f"silence thresh {silence_thresh} and min silence len {min_silence_len} from average loudness of {avg_loudness}")
+    # logger.debug(f"silence thresh {silence_thresh} and min silence len {min_silence_len} from average loudness of {avg_loudness}")
 
 
     chunk_loop = asyncio.get_event_loop()
@@ -76,30 +78,15 @@ async def transcribe_audio_file(audio, name):
     timestamp_loop = asyncio.get_event_loop()
     timestamps = await timestamp_loop.run_in_executor(None, lambda: detect_nonsilent(audio, min_silence_len=min_silence_len, silence_thresh=silence_thresh, seek_step=1))
 
-    # leading_silence = detect_leading_silence(audio, silence_threshold=silence_thresh, chunk_size=1)
-    # timestamps = detect_nonsilent(audio, min_silence_len=min_silence_len, silence_thresh=silence_thresh, seek_step=1)
     chunk_time_ms = 0
     transcript_text = f'\n{name} - Transcription: \n\n'
-    # payload = {
-    #     'sessionID': sessionID,
-    #     'cartKey' : cartKey,
-    #     'fields':
-    #             {'text':transcript_text }
-    #             }
 
-    # await update_cartridge_field(payload, convoID, loadout, True)    
     chunk_time_ms = 0
     chunkID = 0
     tasks = []
-
+    logger.debug(f'number of chunks is {len(chunks)}')
     for chunk in chunks:
         timestamp = timestamps[chunkID]
-        
-        # eZprint(f"chunk {chunkID} length {len(chunk)} and start time {timestamp[0]} and end time {timestamp[1] }", ['FILE_HANDLING', 'TRANSCRIBE'])
-        logger.debug(f"chunk {chunkID} length {len(chunk)} and start time {timestamp[0]} and end time {timestamp[1] }")
-        #getting start and finish but adding a bit
-        #this is with the actual start / finishes
-        # task = asyncio.create_task(transcribe_chunk(chunk, timestamp[0], timestamp[1] , chunkID))
 
         if (os.getenv('DEBUG_TRANSCRIBE_NO_GAPS') == 'True'):
             start = chunk_time_ms
@@ -125,33 +112,27 @@ async def transcribe_audio_file(audio, name):
         tasks.append(task)
         chunkID += 1
 
+    logger.debug('starting async gather transcribe chunks')
     results = await asyncio.gather(*tasks)
     results.sort(key=lambda x: x['chunkID'])
     end = ''
     transcript_text += f"[00:00:00.000] Start of clip \n\n"
+    logger.debug('async gather complete')
     for result in results:
         # eZprint(f"chunk {result['chunkID']} start {result['start']} end {result['end']} text {result['text']}", ['FILE_HANDLING', 'TRANSCRIBE'])
-        logger.debug(f"chunk {chunkID} length {len(chunk)} and start time {timestamp[0]} and end time {timestamp[1] }")
+        # logger.debug(f"chunk {chunkID} length {len(chunk)} and start time {timestamp[0]} and end time {timestamp[1] }")
         start = result['start']
         end = result['end']
         transcript_text += f"{start} --> {end}\n{result['text']} \n\n"
     # transcript text end time stap
     transcript_text += f"[{end}] End of clip \n\n"
 
+    logger.debug(f'results combined, char length of transcript is {len(transcript_text)}')
+
     clip_length_in_seconds = len(audio) / 1000
     rounded_length = round(clip_length_in_seconds, 2)
 
     transcript_text +=  "\nTotal video clip length : " + str(rounded_length) + "s"
-    # transcript_text += "\n b roll elements required : " + str(rounded_length / 10) 
-
-    # payload = {
-    #         'label' : name + '_transcript',
-    #         'type' : 'note',
-    #         'enabled' : True,
-    #         'text': transcript_text,
-
-    #         }
-    # await addCartridge(payload, sessionID, loadout, convoID)
 
     transcript_object = {
                         'name' : name,
@@ -166,7 +147,7 @@ async def transcribe_chunk(chunk, chunk_start, chunk_end, chunkID=0):
     with tempfile.NamedTemporaryFile(suffix='.mp3', delete=True) as chunk_file:
         chunk.export(chunk_file.name, format='mp3')
         # eZprint(f'Saved to:{chunk_file.name} with start of {chunk_start} and length of {chunk_end}', ['TRANSCRIBE_CHUNK'])  # Confirm file path
-        logger.debug(f'Saved to:{chunk_file.name} with start of {chunk_start} and length of {chunk_end}')
+        # logger.debug(f'Saved to:{chunk_file.name} with start of {chunk_start} and length of {chunk_end}')
         # As the file is already created and written to disk, just use the file name.
         response = await asyncio.get_event_loop().run_in_executor(
             None, 

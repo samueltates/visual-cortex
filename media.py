@@ -457,16 +457,16 @@ async def generate_temp_image(prompt):
     
     image_url = response.data[0].url
     response = requests.get(image_url)
-    processed_media = tempfile.NamedTemporaryFile(suffix=".png", delete= True)
-    processed_media.write(response.content)
-    logger.debug(f'Processed media file: {processed_media.name}')
-    processed_media.close()
+    # processed_media = tempfile.NamedTemporaryFile(suffix=".png", delete= True)
+    # processed_media.write(response.content)
+    # logger.debug(f'Processed media file: {processed_media.name}')
+    # processed_media.close()
 
     new_key = generate_id()
     url = await write_file(response.content, new_key )
 
     logger.debug(f'url for image: {url}')
-    return {'prompt':prompt, 'file' : processed_media, 'media_url' : url, 'media_key': new_key}
+    return {'prompt':prompt, 'media_url' : url, 'media_key': new_key}
     
 async def get_image_from_s3(prompt, media_key):
 
@@ -476,7 +476,6 @@ async def get_image_from_s3(prompt, media_key):
     processed_media = tempfile.NamedTemporaryFile( delete=True)
     processed_media.write(file)
     logger.debug(f'Processed media file: {processed_media.name}')
-    processed_media.close()
     return {'prompt':prompt, 'file' : processed_media}
 
 def calculate_pan_position(t, direction, start_position, end_position, pixels_per_second):

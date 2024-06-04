@@ -12,6 +12,7 @@ from hypercorn.asyncio import serve
 app = Quart(__name__)
 app = cors(app, allow_origin=['*'], allow_headers=['content-type','Authorization'],  max_age=86400, allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 app.config['QUART_CORS_ALLOW_HEADERS'] = "contenttype, Authorization"
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 100  # Setting the maximum request size to 100MB
 
 @app.route('/')
 def hello_world():
@@ -70,7 +71,7 @@ async def get_transcript():
     try:
         payload = await request.get_json()
         transcript_object = await transcribe_file(file_key, file_name, file_type)
-        logger.debug('Returning transcript object ', transcript_object )
+        logger.debug('Returning transcript object ' )
         return json.dumps(transcript_object)
 
     except Exception as e:
